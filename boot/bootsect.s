@@ -295,11 +295,10 @@ ok1_read:
 	je ok2_read         ! add 指令结果为0,则进行跳转,(表示上面的 add 指令执行中导致了进位,但是刚好要读取 64KB 大小的数据) 那么也继续读.
 	xor ax,ax			! 若加上此次将读磁道上所有未读扇区的数据,超过了一个段空间大小(64KB)
 	sub ax,bx			! 则计算次数最多能读取的字节数(64KB-段内读偏移位置),再转换成需要读取的扇区数两
-	shr ax,#9           ! 右移动,相当于除以 512,得到的是商区数
+	shr ax,#9           ! 右移动,相当于除以 512,得到的是扇区数
 ok2_read:
-						! 
-	call read_track
-	mov cx,ax
+	call read_track     ! 读取磁盘完成
+	mov cx,ax           ! 该次操作已读取的扇区数
 	add ax,sread
 	seg cs
 	cmp ax,sectors
@@ -322,35 +321,36 @@ ok3_read:
 	xor bx,bx
 	jmp rp_read
 
+						! 读当前磁道上指定开始扇区和需读扇区数的数据到 es:bx 开始处
 read_track:
-	push ax
+	push ax             ! 调用过程之间,向将标志寄存器的值保存
 	push bx
 	push cx
 	push dx
-	mov dx,track
-	mov cx,sread
-	inc cx
-	mov ch,dl
-	mov dx,head
-	mov dh,dl
-	mov dl,#0
-	and dx,#0x0100
-	mov ah,#2
-	int 0x13
-	jc bad_rt
-	pop dx
+	mov dx,track        ! 取当前磁道号
+	mov cx,sread        ! 取当前磁道上的已读扇区
+	inc cx              ! 开始读扇区 cl = 开始读取的扇区
+	mov ch,dl           ! ch = 单曲磁道号
+	mov dx,head         ! 取当前磁头号
+	mov dh,dl           ! dh = 磁头号
+	mov dl,#0           ! dl = 驱动器号(为0表示当前A驱动器)
+	and dx,#0x0100      ! 磁头号不大于 1
+	mov ah,#2           ! 读磁盘扇区的功能号 0x02 表示读取操作
+	int 0x13            ! 0x13 中断,开始磁盘读取,磁盘操作错误,会导致标志寄存器的CF置为1
+	jc bad_rt           ! 磁盘读取的结果出错, 会导致跳转
+	pop dx              ! 过程调用完成,恢复之前的标志寄存器
 	pop cx
 	pop bx
 	pop ax
-	ret
-bad_rt:	mov ax,#0
+	ret                 ! 恢复过程调用之前的 ip寄存器的值,以便过程调用完成,继续向下执行之后的代码
+bad_rt:	mov ax,#0       ! 功能号为0,表示执行磁盘复位操作.
 	mov dx,#0
 	int 0x13
-	pop dx
+	pop dx              ! 重读之前出栈标志寄存器,因为之前入栈了,为了恢复到重读之前的状态,出栈标志寄存器,以便重读
 	pop cx
 	pop bx
 	pop ax
-	jmp read_track
+	jmp read_track      ! 因为上次读取磁盘出错后,磁盘进行了复位操作,然后继续重读
 
 /*
  * This procedure turns off the floppy drive motor, so
