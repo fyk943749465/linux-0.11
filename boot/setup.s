@@ -223,13 +223,13 @@ do_move:
 end_move:
 	mov	ax,#SETUPSEG	! right, forgot this at first. didn't work :-)   
 	mov	ds,ax                                                  ! ds指向本程序段
-	lidt	idt_48		! load idt with 0,0                    ! 加载中断描述符表(idt)寄存器,idt_48 是6字节操作数的位置,
+	lidt	idt_48		! load idt with 0,0                    ! 加载中断描述符表(idt)寄存器,idt_48 是6字节操作数的位置,  (idtr寄存器存处了idt_48的位置)
 															   ! 前 2 字节表示 idt 表的限长, 后 4 字节表示 idt 表所处的基地址
 															   ! 在这条指令中，idt_48 是一个标号（label）或地址，它指向了要加载到 IDT 寄存器
 															   ! 中的 IDT 表的起始地址。这个标号通常是汇编代码中定义的一个符号，用于表示 IDT 表的位置。
 															   ! 具体来说，lidt 指令的含义是加载 IDT 寄存器的值。IDT 寄存器存储了用于处理中断和异常的中断
 															   ! 描述符表的地址。加载 IDT 寄存器的操作是为了告诉处理器在发生中断或异常时应该去查找哪个中断描述符来执行相应的处理程序。
-	lgdt	gdt_48		! load gdt with whatever appropriate   ! 加载全局描述符表(gdt)寄存器, gdt_48 是 6 字节操作数的位置
+	lgdt	gdt_48		! load gdt with whatever appropriate   ! 加载全局描述符表(gdt)寄存器, gdt_48 是 6 字节操作数的位置(gdtr寄存器存储了gdt_48的位置)
 
 ! that was painless, now we enable A20 
 										    ! 以上操作很简单,现在我们开启 A20 地址线. 参见程序列表后有关 A20 信号线说明
@@ -251,6 +251,7 @@ end_move:
 ! which is used for the internal hardware interrupts as well. We just
 ! have to reprogram the 8259's, and it isn't fun.
 
+! 8259A是一款可编程中断控制器（Programmable Interrupt Controller，PIC）芯片，主要的作用是协调和管理计算机系统中的中断请求（IRQs，Interrupt Requests）。
 
 ! 希望以上一切正常. 现在我们必须重新对中断进行编程
 ! 我们将他们放在正好处于 intel 保留的硬件中断后面, int 0x20-0x2F 
