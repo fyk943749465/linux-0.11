@@ -82,7 +82,7 @@ start:               ! 将自身(bootsect)从目前段0x7C00(31KB)移动到0x9000(576KB)处
 go:	mov	ax,cs              ! 从这里开始,已经在段地址 0x9000 处开始执行了, 上面的代码是在段地址 0x7c0 处执行的
 	mov	ds,ax              ! 将 ds,es和ss都置成移动后代码所在的段处(0x9000).由于程序中有堆栈操作(push,pop,call),因此必须设置堆栈
 	mov	es,ax
-! put stack at 0x9ff00.
+! put stack at 0x9ff00.    ! 这里修改ss=0x9000 sp=0xff00 因为ss:sp 指向的是程序中的堆栈,为了不影响后面加载setup程序,将 sp指向了段内的更远处.只是为了防止出现错误
 	mov	ss,ax			   ! 将堆栈指针 SS:SP 指向 0x9ff00(即 0x9000:0xff00)处
 	mov	sp,#0xFF00		! arbitrary value >>512
 							!由于代码段移动过了,所以要重新设置堆栈段的位置. SP 只要指向远大于 512 偏移(即地址0x90200)处都可以.因为
@@ -143,7 +143,7 @@ ok_load_setup:
 						! 因此，在使用int 0x13中断时，通常需要查阅相关的文档或手册，以了解每个子功能的标志寄存器状态含义。
 ! Get disk drive parameters, specifically nr of sectors/track
 
-	mov	dl,#0x00
+	mov	dl,#0x00        ! dl 表示驱动号
 	mov	ax,#0x0800		! AH=8 is get drive parameters  AH=8 表示获取磁盘参数
 	int	0x13            ! 13号中断 8号子功能,获取磁盘参数   
 	mov	ch,#0x00        ! 0柱面
@@ -249,7 +249,7 @@ ok_load_setup:
 	seg cs
 	mov	ax,root_dev                   ! 根设备号
 	cmp	ax,#0
-	jne	root_defined                  ! 比较结果不为0,则跳转到 root_defined 处执行
+	jne	root_defined                  ! 比较结果不为0,则跳转到 root_defined 处执行(两个操作数不相等,则执行跳转)
 	seg cs
 	mov	bx,sectors                    ! 每磁道的扇区数(之前利用0x13中断读取磁盘信息时得到的).
 									  ! 如果 sectors = 15 则说明是 1.2Mb 的驱动器; 如果 sectors = 18,则说明是1.44MB的软驱					 
