@@ -43,11 +43,11 @@ static inline volatile void oom(void)
 __asm__("movl %%eax,%%cr3"::"a" (0))
 
 /* these are not to be changed without changing head.s etc */
-#define LOW_MEM 0x100000
-#define PAGING_MEMORY (15*1024*1024)
-#define PAGING_PAGES (PAGING_MEMORY>>12)
-#define MAP_NR(addr) (((addr)-LOW_MEM)>>12)
-#define USED 100
+#define LOW_MEM 0x100000                           // 内存低端 1MB
+#define PAGING_MEMORY (15*1024*1024)               // 分页内存 15MB,主内存区最多15MB
+#define PAGING_PAGES (PAGING_MEMORY>>12)           // 分页后的物理内存页数
+#define MAP_NR(addr) (((addr)-LOW_MEM)>>12)        // 指定内存地址映射为页号
+#define USED 100                                   // 页面被占用标志
 
 #define CODE_SPACE(addr) ((((addr)+4095)&~4095) < \
 current->start_code + current->end_code)
@@ -57,6 +57,7 @@ static long HIGH_MEMORY = 0;
 #define copy_page(from,to) \
 __asm__("cld ; rep ; movsl"::"S" (from),"D" (to),"c" (1024):"cx","di","si")
 
+// 内存映射字节图(1字节代表1页内存),每个页面对应的字节用于标志页面当前被引用(占用)次数.
 static unsigned char mem_map [ PAGING_PAGES ] = {0,};
 
 /*
@@ -399,17 +400,22 @@ void do_no_page(unsigned long error_code,unsigned long address)
 	oom();
 }
 
+// 物理内存初始化.
+// 参数: start_mem - 可用作分页处理的物理内存的起始位置(已去除RAMDISK所占内存空间等)
+//       end_mem   - 实际物理内存最大地址
+// 在该版本的 Linux 内核中,最多能使用 16MB的内存,大于16MB的内存将不予考虑,弃之不用.
+// 0-1MB内存空间用于内核系统(其实是0-640Kb)
 void mem_init(long start_mem, long end_mem)
 {
 	int i;
 
-	HIGH_MEMORY = end_mem;
-	for (i=0 ; i<PAGING_PAGES ; i++)
-		mem_map[i] = USED;
-	i = MAP_NR(start_mem);
-	end_mem -= start_mem;
-	end_mem >>= 12;
-	while (end_mem-->0)
+	HIGH_MEMORY = end_mem;                // 设置内存最高端
+	for (i=0 ; i<PAGING_PAGES ; i++)      // 首先置所有页面已占用(USED=100)状态
+		mem_map[i] = USED;                // 即将页面映射数组全置成USED
+	i = MAP_NR(start_mem);                // 然后计算可使用其实内存的页面号
+	end_mem -= start_mem;                 // 再计算可分页处理的内存块大小
+	end_mem >>= 12;                       // 从而计算出可用于分页处理的页面数
+	while (end_mem-->0)                   // 最后将这些可用页面对应的页面映射数组清零.
 		mem_map[i++]=0;
 }
 

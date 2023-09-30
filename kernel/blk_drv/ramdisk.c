@@ -20,6 +20,12 @@
 char	*rd_start;
 int	rd_length = 0;
 
+// 虚拟盘当前请求项操作函数.程序结构与do_hd_request类似(hd.c)
+// 在低级块设备接口函数ll_rw_block建立了虚拟盘rd的请求项并添加到rd的链表中之后,
+// 就会调用该函数对rd当前请求项进行处理.该函数首先计算当前请求项中指定的起始扇区对应虚拟盘所处内存的起始位置addr和
+// 要求的扇区数对应的字节长度值 len,然后根据请求项中的命令进行操作.若是写命令WRITE,就把请求项所指缓冲区中的数据直接
+// 复制到内存位置addr处.如是读操作则反之.数据复制完成之后既可以直接调用end_request()对本次请求项做结束处理.
+// 然后跳转到函数开始处在区处理下一个请求项.
 void do_rd_request(void)
 {
 	int	len;
@@ -49,12 +55,14 @@ void do_rd_request(void)
 /*
  * Returns amount of memory which needs to be reserved.
  */
+// 分号内存虚拟盘 ramdisk 所需要的内存量
+// 虚拟盘初始化函数.确定虚拟盘再内存中的起始地址,长度.并对整个虚拟盘区清零.
 long rd_init(long mem_start, int length)
 {
 	int	i;
 	char	*cp;
 
-	blk_dev[MAJOR_NR].request_fn = DEVICE_REQUEST;
+	blk_dev[MAJOR_NR].request_fn = DEVICE_REQUEST;  // do_rd_request()
 	rd_start = (char *) mem_start;
 	rd_length = length;
 	cp = rd_start;

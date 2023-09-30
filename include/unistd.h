@@ -59,7 +59,7 @@
 #include <sys/utsname.h>
 #include <utime.h>
 
-#ifdef __LIBRARY__
+#ifdef __LIBRARY__   // 如果标识符__LIBRARY__在代码的其他地方已经用 #define 定义过，那么 #ifdef 后面的代码块将会被编译；
 
 #define __NR_setup	0	/* used only by init, to get system going */
 #define __NR_exit	1
