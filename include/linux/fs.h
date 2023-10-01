@@ -22,6 +22,17 @@
  * 7 - unnamed pipes
  */
 
+/* 
+ * 系统所含的设备如下:(与Minix系统一样,所以我们可以使用 minix的文件系统. 以下这些时主设备号.)
+ * 0 没有用到 
+ * 1 - /dev/mem  内存设备 
+ * 2 - /dev/fd   软盘设备 
+ * 3 - /dev/hd   硬盘设备
+ * 4 - /dev/ttyx tty串行终端设备
+ * 5 - /dev/tty  tty终端设备
+ * 6 - /dev/lp   打印设备
+ * 7 - unnamed pipes 没有命名的管道
+ */
 #define IS_SEEKABLE(x) ((x)>=1 && (x)<=3)
 
 #define READ 0
@@ -46,7 +57,7 @@ void buffer_init(long buffer_end);
 #define NR_FILE 64
 #define NR_SUPER 8
 #define NR_HASH 307
-#define NR_BUFFERS nr_buffers
+#define NR_BUFFERS nr_buffers  // 
 #define BLOCK_SIZE 1024
 #define BLOCK_SIZE_BITS 10
 #ifndef NULL
@@ -164,7 +175,7 @@ extern struct m_inode inode_table[NR_INODE];
 extern struct file file_table[NR_FILE];
 extern struct super_block super_block[NR_SUPER];
 extern struct buffer_head * start_buffer;
-extern int nr_buffers;
+extern int nr_buffers;         // 缓冲块数
 
 extern void check_disk_change(int dev);
 extern int floppy_change(unsigned int nr);
