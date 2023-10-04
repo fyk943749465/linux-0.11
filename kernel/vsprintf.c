@@ -91,6 +91,9 @@ static char * number(char * str, int num, int base, int size, int precision
 	return str;
 }
 
+// 下面函数是送格式化输出到字符串中
+// 为了能在内核中使用格式化输出, Linus在内核实现了该C标准函数.
+// 其中参数 fmt 是格式字符串; args 是个数变化的值; buf 是输出字符串缓冲区
 int vsprintf(char *buf, const char *fmt, va_list args)
 {
 	int len;
