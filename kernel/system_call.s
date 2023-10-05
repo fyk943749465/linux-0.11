@@ -178,6 +178,9 @@ ret_from_sys_call:
 	pop %ds
 	iret
 
+
+# int16 -- 下面这段代码处理协处理器发出的出错信号.跳转执行C函数math_error()
+# (kernel/math/math_emulate.c) 返回后将跳转到 ret_from_sys_call 处继续执行.
 .align 2
 _coprocessor_error:
 	push %ds
@@ -187,14 +190,20 @@ _coprocessor_error:
 	pushl %ecx
 	pushl %ebx
 	pushl %eax
-	movl $0x10,%eax
+	movl $0x10,%eax           # ds,es置为指向内核数据段
 	mov %ax,%ds
 	mov %ax,%es
-	movl $0x17,%eax
+	movl $0x17,%eax           # fs 置为指向局部数据段(出错程序的数据段)
 	mov %ax,%fs
-	pushl $ret_from_sys_call
-	jmp _math_error
+	pushl $ret_from_sys_call  # 把下面调用返回的地址入栈
+	jmp _math_error           # 执行 C 函数 math_error() (kernel/math/math_emulate.c)
 
+
+# int7 -- 设备不存在或些处理不存在
+# 如果控制寄存器 CR0 的 EM 标志置位,则当 CPU 执行一个 ESC 转义指令时就会引发该中断, 这样就可以有机会让这个中断
+# 处理程序模拟 ESC 转移指令. CR0的TS标志时在 CPU 执行任务转换时设置的. TS 可以用来确定什么时候协处理器中的内容(上下文)
+# 与 CPU 正在执行的任务不匹配了. 当 CPU 在运行一个转义指令时发现TS置为,就会引发该中断. 此时就应该恢复新任务的些处理
+# 执行状态. 参见(kernel/sched.c)中的说明. 该中断最后将转移到标号 ret_from_sys_call 处执行下去.
 .align 2
 _device_not_available:
 	push %ds
@@ -204,25 +213,45 @@ _device_not_available:
 	pushl %ecx
 	pushl %ebx
 	pushl %eax
-	movl $0x10,%eax
+	movl $0x10,%eax             # ds,es置为指向内核数据段
 	mov %ax,%ds
 	mov %ax,%es
-	movl $0x17,%eax
+	movl $0x17,%eax             # fs 置为指向局部数据段(出错程序的数据段)
 	mov %ax,%fs
-	pushl $ret_from_sys_call
-	clts				# clear TS so that we can use math
+	pushl $ret_from_sys_call    # 把下面跳转或调用的返回地址入栈
+
+	# clts 指令用于清除控制寄存器 CR0 中的 Task-Switched Flag（TSF）位，以取消任务切换的标志，
+    # 使处理器继续执行当前任务。这是在操作系统内核开发中使用的一条重要指令。						
+	clts				# clear TS so that we can use math  (TS位是第3位,EM为第2位, 从0开始到31)
 	movl %cr0,%eax
 	testl $0x4,%eax			# EM (math emulation bit)
+
+	# 这里进行位测试，检查 CR0 寄存器的第 2 位是否被设置（即 EM 位，代表浮点数协处理器的数学仿真）。如果 EM 位被清除（为0），
+    # 则执行跳转到 _math_state_restore 标签，表示浮点数协处理器可用，不需要进行数学仿真。
 	je _math_state_restore
 	pushl %ebp
 	pushl %esi
 	pushl %edi
+
+	# "数学仿真"（Math Emulation）是一种在不具备硬件浮点数支持的系统上模拟浮点数运算的技术。在某些较早的计算机系统中，没有硬件浮点数处理器，
+	# 因此无法直接执行浮点数运算。为了支持浮点数运算，系统开发人员需要实现浮点数运算的软件模拟，即数学仿真。
+	# 数学仿真的基本思想是使用整数运算和位操作来模拟浮点数运算。它包括模拟浮点数的加法、减法、乘法、除法等基本运算，以及处理浮点数的特殊情况，
+	# 如溢出、无穷大、NaN（非数字）、舍入等。
+	# 数学仿真的实现可以相当复杂，因为浮点数运算涉及到许多规范和精度要求。因此，数学仿真的性能通常较低，而且需要大量的计算资源和代码来实现。
+	# 在某些情况下，数学仿真可能仍然是必要的，例如在没有硬件浮点数支持的嵌入式系统中，或者在模拟器中运行的程序，其中浮点数运算需要在模拟器中进行。
+	# 在你提供的汇编代码中，当检测到控制寄存器 CR0 的 EM 位（位 2）被设置时，意味着浮点数协处理器的数学仿真被启用，因此需要执行相应的数学仿真代码来
+	# 支持浮点数运算。否则，如果 EM 位被清除，说明硬件浮点数支持可用，不需要进行仿真。这是为了在没有硬件浮点数支持的系统上模拟浮点数运算的一种常见场景。
 	call _math_emulate
 	popl %edi
 	popl %esi
 	popl %ebp
-	ret
+	ret                  # 跳转到 ret_from_sys_call 处执行
 
+
+# int32 -- (int 0x20)时钟中断处理程序.中断频率被设置为 100Hz (include/linux/sched.h),
+# 定时芯片 8253/8254 是在(kernel/sched.c)处初始化的. 因此这里 jiffies 每10毫秒加1.
+# 这段代码将 jiffies 增1,发送结束中断指令给8259控制器,然后用当前特权级作为参数调用 C 
+# 函数 do_time(long CPL). 当调用返回时转去检测并处理信号.
 .align 2
 _timer_interrupt:
 	push %ds		# save ds,es and put kernel data space
@@ -237,38 +266,74 @@ _timer_interrupt:
 	mov %ax,%es
 	movl $0x17,%eax
 	mov %ax,%fs
-	incl _jiffies
+	incl _jiffies       # 从开机开始算起的滴答数时间值(10ms/滴答), 这里将滴答数+1
+
+	# 在计算机硬件和操作系统领域，EOI（End Of Interrupt）是一个缩写，表示中断处理的结束信号。EOI 信号用于通知中断控制器（例如，PIC、APIC等）
+	# 或其他硬件部件，表明正在处理的中断已经处理完毕，可以继续处理其他中断或任务。
+	# EOI 通常在中断服务例程（ISR）执行完成后发送。当操作系统或硬件处理某个中断时，它会执行相应的中断处理程序，处理完后，发送 EOI 信号。
+	# 这个信号的发送告诉中断控制器可以将中断状态清除，并允许接受和处理下一个中断。
+	# EOI 的确切实现方式取决于中断控制器和硬件平台。在x86体系结构中，有两个常见的中断控制器：8259A 可编程中断控制器（PIC）和高级可编程中断控制器（APIC）。
+	# 在这两种情况下，EOI 的方式可能不同。
+	# 总之，EOI 是中断处理的结束信号，用于通知硬件中断控制器或其他部件，当前中断已经处理完毕，可以继续处理其他中断或任务。
+
+	# 由于初始化中断控制芯片时没有采用自动EOI,所以这里需要发指令结束该硬件中断.
 	movb $0x20,%al		# EOI to interrupt controller #1
-	outb %al,$0x20
-	movl CS(%esp),%eax
+	outb %al,$0x20      # 操作命令字 OCW2 送 0x20 端口
+
+	# 下面三句从选择符中取出当前特权级别(0或3)并压入堆栈, 作为 do_timer 的参数
+
+	# movl CS(%esp), %eax 是一条汇编指令，它的含义是从堆栈中读取位于栈顶的一个叫做 CS 的偏移量处的双字（4字节）数据，并将该数据加载到 %eax 寄存器中。
+    # 这个指令的具体含义和功能取决于上下文，特别是栈上数据的结构和用途。在这个指令中，CS 通常是一个相对于栈顶的偏移量，用于访问特定数据或者控制栈上的某些操作。
+    # 需要注意的是，这个指令中的 CS 可能是一个占位符，而实际的偏移量可能在代码的其他地方进行了定义或计算。因此，为了正确理解这个指令的含义，需要查看
+	# 指令所在上下文以及任何相关的代码。
+	movl CS(%esp),%eax          # CS是相对于栈顶esp的一个偏移量
 	andl $3,%eax		# %eax is CPL (0 or 3, 0=supervisor)
 	pushl %eax
-	call _do_timer		# 'do_timer(long CPL)' does everything from
-	addl $4,%esp		# task switching to accounting ...
-	jmp ret_from_sys_call
 
+
+	# do_timer(CPL)执行任务切换,计时等工作,在kernel/shched.c 实现
+	call _do_timer		# 'do_timer(long CPL)' does everything from
+	addl $4,%esp		# task switching to accounting ...   指向新的栈顶位置
+	jmp ret_from_sys_call    # 时间中断调用返回
+
+# 这是 sys_execve()系统调用. 取中断调用程序的代码指针作为参数调用C函数do_execve()
 .align 2
 _sys_execve:
+
+	# lea EIP(%esp), %eax 这行代码使用了 x86 汇编语言中的 LEA 指令，其含义是将栈顶指针 %esp 寄存器的值与指令指针 %eip 相加，然后将结果加载到 %eax 寄存器中。
+    # 需要注意的是，在这个上下文中，EIP 和 ESP 不是通常的寄存器名，而是寄存器的扩展形式。通常，EIP 是指令指针寄存器，ESP 是栈指针寄存器。在汇编语言中，
+	# 寄存器名称通常以 % 开头，例如 %eip 和 %esp。
+	# 这个指令的实际含义取决于上下文，因为在汇编语言中，寄存器和内存地址可以以多种方式组合在一起。LEA 指令通常被用于执行一些复杂的地址计算，而不是简单的加载。
+    # 因此，要完全理解这个指令的含义，需要查看它在程序的上下文中是如何使用的，包括 EIP 和 ESP 的具体值以及指令后续的操作。
 	lea EIP(%esp),%eax
 	pushl %eax
 	call _do_execve
-	addl $4,%esp
-	ret
+	addl $4,%esp     # 丢弃调用时压入栈的 EIP 值
+	ret            
 
+# sys_fork()调用,用于创建子进程,是system_call功能2. 原形在 include/linux/sys.h中.
+# 首先调用C函数 find_empty_process(),取得一个进程号pid.若返回负数则说明目前任务数组已满.
+# 然后调用 copy_process() 复制进程.
 .align 2
 _sys_fork:
-	call _find_empty_process
-	testl %eax,%eax
-	js 1f
+	call _find_empty_process            # 调用 find_empty_process() (kernel/fork.c)
+	testl %eax,%eax                     # 测试,影响标志寄存器SF位,符号标志位
+	js 1f                               # 如果测试结果为负数,则跳转到标号1处执行
 	push %gs
 	pushl %esi
 	pushl %edi
 	pushl %ebp
 	pushl %eax
-	call _copy_process
-	addl $20,%esp
+	call _copy_process                  # 调用C函数的 copy_process()(kernel/fork.c)
+	addl $20,%esp                       # 丢弃这里所有压栈的内容
 1:	ret
 
+
+# int46 -- (int 0x2E) 硬盘中断处理程序,响应硬件中断请求 IRQ14
+# 当硬盘操作完成或出错就会发出此中断信号.(参见kernel/blk_drv/hd.c)
+# 首先向8259A中断控制从芯片发送结束硬件中断指令(EOI),然后取变量do_hd中的函数指针放入edx
+# 寄存器中,并置do_hd为NULL,接着判断edx函数指针是否为空. 如果为空,则给edx赋值指向unexpected_hd_interrupt(),用于显示出错信息.
+# 随后向8259A主芯片发送EOI指令,并调用edx中指针指向的函数:read_intr(), write_intr()或unexpected_hd_interrupt().
 _hd_interrupt:
 	pushl %eax
 	pushl %ecx
@@ -281,17 +346,22 @@ _hd_interrupt:
 	mov %ax,%es
 	movl $0x17,%eax
 	mov %ax,%fs
+	# 由于初始化中断控制芯片时没有采用自动 EOI,所以这里需要发指令结束该硬件中断.
 	movb $0x20,%al
 	outb %al,$0xA0		# EOI to interrupt controller #1
 	jmp 1f			# give port chance to breathe
-1:	jmp 1f
+1:	jmp 1f          # 延时作用
 1:	xorl %edx,%edx
-	xchgl _do_hd,%edx
-	testl %edx,%edx
-	jne 1f
+	# xchgl 是x86汇编语言中的指令，它的含义是"交换（exchange）两个操作数的值"。具体来说，xchgl 用于交换一个通用寄存器和一个内存位置或另一个寄存器的值。
+	# xchgl 指令将 operand1 和 operand2 的值进行交换，即 operand1 的值将成为新的 operand2 的值，而 operand2 的值将成为新的 operand1 的值。
+	# 这个交换操作是原子的，不会被中断，因此在多线程或多进程环境中用于同步操作是非常有用的。
+	xchgl _do_hd,%edx            # do_hd定义为一个函数指针,将被赋值read_intr()或write_intr()函数地址.(kernel/blk_drv/hd.c)
+								 # 放到edx 寄存器后就将 do_hd 指针变量置为 NULL
+	testl %edx,%edx              # 测试函数指针是否为NULL
+	jne 1f                       # 若空,则使指针指向C函数 unexpected_hd_interrupt()
 	movl $_unexpected_hd_interrupt,%edx
-1:	outb %al,$0x20
-	call *%edx		# "interesting" way of handling intr.
+1:	outb %al,$0x20               # 送主8259A中断控制器EOI指令(结束硬件中断)
+	call *%edx		# "interesting" way of handling intr.   调用do_hd指向的 C 函数
 	pop %fs
 	pop %es
 	pop %ds
@@ -300,6 +370,11 @@ _hd_interrupt:
 	popl %eax
 	iret
 
+# int38 -- (int 0x26) 软盘驱动器中断处理程序,响应硬件中断请求 IRQ6
+# 其处理过程与上面对硬盘的处理基本一样(kernel/blk_drv/floppy.c)
+# 首先向 8259A 中断控制器主芯片发送 EOI 指令, 返回取变量do_floppy中的函数指针放入 eax 寄存器中, 并置 do_floppy为NULL, 
+# 接着判断 eax 函数指针是否为空. 如为空,则给 eax 赋值指向 unexpected_floppy_interrupt(),用于显示出错信息. 随后调用 eax 指向
+# 的函数 : rw_interrupt, seek_interrupt, recal_interrupt, reset_interrupt 或 unexpected_floppy_interrupt 
 _floppy_interrupt:
 	pushl %eax
 	pushl %ecx
@@ -315,11 +390,12 @@ _floppy_interrupt:
 	movb $0x20,%al
 	outb %al,$0x20		# EOI to interrupt controller #1
 	xorl %eax,%eax
-	xchgl _do_floppy,%eax
-	testl %eax,%eax
+	xchgl _do_floppy,%eax       # do_floppy 为一函数指针,将被赋值实际处理 C 函数程序, 
+								# 放到 eax 寄存器后就将 do_floppy 指针变量置空.
+	testl %eax,%eax             # 测试函数指针是否等于NULL?
 	jne 1f
 	movl $_unexpected_floppy_interrupt,%eax
-1:	call *%eax		# "interesting" way of handling intr.
+1:	call *%eax		# "interesting" way of handling intr.  调用 do_floppy 指向的函数
 	pop %fs
 	pop %es
 	pop %ds
@@ -328,6 +404,8 @@ _floppy_interrupt:
 	popl %eax
 	iret
 
+# int 39 -- (int 0x27) 并行口中断处理程序, 对应硬件中断请求信号IRQ7
+# 本版本内核还为实现,这里只是发送 EOI 指令 
 _parallel_interrupt:
 	pushl %eax
 	movb $0x20,%al

@@ -305,6 +305,9 @@ void add_timer(long jiffies, void (*fn)(void))
 	sti();
 }
 
+// 时钟中断 C 函数处理程序, 在kernel/system_call.s中的_timer_interrupt处被调用.
+// 参数 cpl 是当前特权级0或3, 0 表示内核代码在执行. 3表示用户态
+// 对于一个进程由于执行时间片用完时,则进行任务切换.并执行一个计时更新工作.
 void do_timer(long cpl)
 {
 	extern int beepcount;
